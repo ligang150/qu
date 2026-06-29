@@ -43,7 +43,7 @@ adapter = requests.adapters.HTTPAdapter(
 )
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
-_HTTP_TIMEOUT = 3  # 单个请求3秒超时，快速失败
+_HTTP_TIMEOUT = 2  # 单个请求2秒超时，快速失败
 
 # 访问密码
 ACCESS_PASSWORD = os.environ.get('ACCESS_PASSWORD', 'queue2025')
@@ -464,7 +464,7 @@ def get_next_empty_row(sheet_id, start_from=2, max_batches=4):
     if _empty_row_cache["row"] >= start_from and (now - _empty_row_cache["timestamp"]) < EMPTY_ROW_CACHE_TTL:
         return _empty_row_cache["row"]
 
-    batch_size = 200  # 减小批次，更快发现空行
+    batch_size = 300  # 增大批次减少API调用
     batches_done = 0
     for offset in range(start_from - 1, 2000, batch_size):
         batches_done += 1
@@ -658,16 +658,15 @@ def read_calculated_date_from_row(row_index_1based):
 def _find_user_temp_row_in_sheet(submitter_id):
     """扫描腾讯表格，查找该用户的临时行（Render重启后内存缓存丢失时的兜底）
     条件：A列有值（型号），F列为空（未提交排队）
-    优化：一次性读取A:F列，避免逐行API调用
-    """
+    优化：批量读取A:F列，减少API调用次数"""
     if not submitter_id:
         return 0
     try:
-        batch_size = 50
-        for offset in range(0, 2000, batch_size):
+        batch_size = 150  # 增大批次，减少API调用
+        for offset in range(0, 1500, batch_size):
             start = offset + 1
             end = offset + batch_size
-            # 一次性读取A:F列（避免逐行API调用）
+            # 一次性读取A:F列
             range_str = f"A{start}:F{end}"
             grid_data = read_sheet_range(SHEET_ID, range_str)
             rows = grid_data.get("rows", [])
@@ -886,8 +885,7 @@ def get_models():
 
 # 计算结果缓存：避免重复计算
 _calc_result_cache = {"key": None, "result": None, "timestamp": 0}  # 计算结果缓存
-_CALC_CACHE_TTL = 300  # 计算结果缓存TTL（5分钟）
-_CALC_CACHE_TTL = 30  # 30秒缓存
+_CALC_CACHE_TTL = 60  # 60秒缓存，配合后台预加载提速
 
 # 待处理行缓存
 _pending_row_cache = {"data": None, "timestamp": 0}

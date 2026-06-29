@@ -25,8 +25,8 @@ adapter = requests.adapters.HTTPAdapter(
 HTTP.mount('https://', adapter)
 HTTP.mount('http://', adapter)
 
-# 超时配置：5秒平衡速度和可靠性
-_HTTP_TIMEOUT = 5  # 单个请求5秒超时
+# 超时配置：3秒快速失败，配合并行读取提升速度
+_HTTP_TIMEOUT = 3  # 单个请求3秒超时
 
 # 外部注入的token获取函数
 _token_getter = None
@@ -329,18 +329,21 @@ def get_sheet_data(sheet_id, start_row, capacity_col, limit_cell, row_count):
     if cached is not None:
         return cached
 
-    # 3. 从腾讯API读取（分两次读取，每次只读一列，大幅减少数据量）
+    # 3. 从腾讯API并行读取（两列同时读取，速度提升约50%）
     # 例如C310：原来读A4:AD228=6750个单元格，现在读A4:A228+AD4:AD228=450个单元格
     end_row = start_row + row_count - 1
 
-    # 读取日期列（A列）
+    # 并行读取日期列（A列）和产能列
     date_range = f"A{start_row}:A{end_row}"
-    date_grid = read_sheet_range(sheet_id, date_range)
-    date_rows = date_grid.get("rows", [])
-
-    # 读取产能列
     cap_range = f"{capacity_col}{start_row}:{capacity_col}{end_row}"
-    cap_grid = read_sheet_range(sheet_id, cap_range)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        date_future = executor.submit(read_sheet_range, sheet_id, date_range)
+        cap_future = executor.submit(read_sheet_range, sheet_id, cap_range)
+        date_grid = date_future.result()
+        cap_grid = cap_future.result()
+
+    date_rows = date_grid.get("rows", [])
     cap_rows = cap_grid.get("rows", [])
 
     date_capacity_map = {}
@@ -578,10 +581,14 @@ def _preload_single_model(model, config):
         date_range = f"A{start_row}:A{end_row}"
         cap_range = f"{capacity_col}{start_row}:{capacity_col}{end_row}"
 
-        date_grid = read_sheet_range(sheet_id, date_range)
-        date_rows = date_grid.get("rows", [])
+        # 并行读取两列（速度提升约50%）
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            date_future = executor.submit(read_sheet_range, sheet_id, date_range)
+            cap_future = executor.submit(read_sheet_range, sheet_id, cap_range)
+            date_grid = date_future.result()
+            cap_grid = cap_future.result()
 
-        cap_grid = read_sheet_range(sheet_id, cap_range)
+        date_rows = date_grid.get("rows", [])
         cap_rows = cap_grid.get("rows", [])
 
         if not date_rows and not cap_rows:
@@ -629,12 +636,12 @@ def _preload_single_model(model, config):
 
 
 def _preload_all_models():
-    """预抓取所有型号的产能数据到内存 - 3并发（平衡速度和限流风险）"""
-    print(f"[preload] 开始预抓取 {len(MODEL_CONFIG)} 个型号（并发3线程）...", flush=True)
+    """预抓取所有型号的产能数据到内存 - 5并发（充分利用连接池）"""
+    print(f"[preload] 开始预抓取 {len(MODEL_CONFIG)} 个型号（并发5线程）...", flush=True)
     success = 0
     errors = []
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {
             executor.submit(_preload_single_model, model, config): model
             for model, config in MODEL_CONFIG.items()
@@ -660,8 +667,8 @@ def _preload_all_models():
 
 def _preload_worker():
     """后台预抓取工作线程，根据北京时间动态调整间隔"""
-    # 首次启动时延迟15秒，避免与第一个用户请求竞争资源
-    _preload_stop_event.wait(15)
+    # 首次启动时延迟3秒，快速预热缓存
+    _preload_stop_event.wait(3)
     if _preload_stop_event.is_set():
         return
 
@@ -671,10 +678,9 @@ def _preload_worker():
         except Exception as e:
             print(f"[preload] 预抓取异常: {e}", flush=True)
 
-        # 根据北京时间决定等待间隔：白天(7-22点)120秒，夜间600秒
-        # 增大间隔减少API调用频率，避免token问题时大量请求
+        # 根据北京时间决定等待间隔：白天(7-22点)90秒，夜间600秒
         hour = datetime.now().hour
-        wait_seconds = 120 if 7 <= hour < 22 else 600
+        wait_seconds = 90 if 7 <= hour < 22 else 600
         _preload_stop_event.wait(wait_seconds)
 
 
