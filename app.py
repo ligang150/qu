@@ -485,15 +485,16 @@ def get_next_empty_row(sheet_id, start_from=2, max_batches=4):
             actual_row = start + i  # 1-based实际行号
             if actual_row < 2:
                 continue  # 跳过表头
-            has_data = False
-            for v in row.get("values", []):
-                cv = v.get("cellValue")
-                if cv:
-                    text = parse_cell_value(cv)
-                    if text.strip():
-                        has_data = True
-                        break
-            if not has_data:
+            # 仅检查A列（型号）是否为空来判定空白行
+            values = row.get("values", [])
+            is_empty = True
+            if values:
+                a_cv = values[0].get("cellValue")
+                if a_cv:
+                    a_text = parse_cell_value(a_cv)
+                    if a_text.strip():
+                        is_empty = False
+            if is_empty:
                 _empty_row_cache = {"row": actual_row, "timestamp": now}
                 return actual_row
 
