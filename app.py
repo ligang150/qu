@@ -999,7 +999,7 @@ def calculate_date():
                 return jsonify({
                     "success": True,
                     "calculated_date": _calc_result_cache["result"],
-                    "row_index": int(pending_row_index) if pending_row_index else 0,
+                    "row_index": int(pending_row_index) if pending_row_index else _calc_result_cache.get("row_index", 0),
                     "message": ""
                 })
 
@@ -1059,6 +1059,7 @@ def calculate_date():
         if not force_refresh:
             _calc_result_cache["key"] = cache_key
             _calc_result_cache["result"] = calculated_date
+            _calc_result_cache["row_index"] = target_row
             _calc_result_cache["timestamp"] = now
 
         return jsonify({
