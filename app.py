@@ -518,12 +518,13 @@ def batch_update(requests_body):
         return resp
     except Exception as e:
         print(f"[WARN] batch_update exception: {e}", flush=True)
-        # 返回一个模拟的错误响应
+        # 返回一个模拟的错误响应（捕获 e 的值避免 Python 3 闭包作用域问题）
+        err_msg = str(e)
         class FakeResp:
             status_code = 500
-            text = str(e)
+            text = err_msg
             def json(self):
-                return {"ret": -1, "error": str(e)}
+                return {"ret": -1, "error": self.text}
         return FakeResp()
 
 
