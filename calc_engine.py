@@ -272,8 +272,8 @@ def _get_preloaded_data(cache_key):
     with _preload_cache_lock:
         if cache_key in _preload_cache:
             entry = _preload_cache[cache_key]
-            # 预加载数据有效期更长（2倍间隔）
-            if time_module.time() - entry["ts"] < PRELOAD_INTERVAL * 2:
+            # 预加载数据有效期500秒
+            if time_module.time() - entry["ts"] < 500:
                 return entry["data"]
     return None
 
